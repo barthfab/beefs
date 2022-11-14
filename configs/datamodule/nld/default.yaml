@@ -1,0 +1,15 @@
+nld:
+  begin_entity_token: '['
+  separator_token: '|'
+  relation_separator_token: '='
+  end_entity_token: ']'
+  query_separator_token: ':'
+  example_separator: '###'
+  head: 'Convert this text:'
+  example_head: 'Example: '
+  output_head: 'Output: '
+
+  replace: True
+  skip_example_with_special_token: True
+  reformat_begin_entity_token: '('
+  reformat_end_entity_token: ')'

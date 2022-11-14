@@ -1,0 +1,20 @@
+_target_: src.datamodules.biomedical_datamodule.SingleDataset
+
+defaults:
+  - nld: default
+
+data_set: bionlp_st_2013_pc
+#entity types that should be ignored. Seperated by ','
+blocked_entities: Entity
+#random or event specific
+learning_method: 'event_spec'
+no_event_threshold: 0.2
+#add entity type to input example
+entity_type: True
+split: validation
+
+
+batch_size: 1
+example_size: 17
+num_workers: 0
+pin_memory: False

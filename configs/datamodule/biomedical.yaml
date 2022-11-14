@@ -1,0 +1,19 @@
+_target_: src.datamodules.biomedical_datamodule.BioDataset
+
+defaults:
+  - prompts: default
+  - nld: default
+
+data_sets: bionlp_st_2013_pc
+#entity types that should be ignored. Seperated by ','
+blocked_entities: Entity
+#add entity type to input example
+entity_type: False
+#dastenset overlapping
+overlapping: True
+split: validation
+
+
+batch_size: 1
+num_workers: 0
+pin_memory: False

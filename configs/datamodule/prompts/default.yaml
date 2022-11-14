@@ -1,0 +1,25 @@
+prompts:
+  #on which event types should be trained. seperated by ','
+  event_types_training: all
+
+  #which event type should be predicted in the examples in prompt.  seperated by ','
+  predict_event_type_names: all
+  #which event type should in the non-filler examples in prompt.  seperated by ','
+  example_event_type_names: all
+
+  #number of examples before pred. sentence
+  max_input_examples: 3
+  #number of examples with same event type in prompt
+  event_type_threshold: 2
+  #which event type should fill up the examples in prompt.  seperated by ','
+  event_type_filler: all
+
+  #number of max other event types in one sentence
+  max_event_type_num: 2
+  #number of min other event types in one sentence
+  min_event_type_num: 0
+
+  #number of max events in sentence
+  max_events: 4
+  #number of min events in sentence
+  min_events: 0
