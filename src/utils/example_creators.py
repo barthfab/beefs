@@ -632,7 +632,7 @@ def sort_examples_by_event_type(examples, event_types, event_type_addition) -> D
     return sorted_examples
 
 
-def built_eval_doc_sorted(results: Tuple, event_types: List, arg_finder: int = 0, nested_offset: int = 20, example_offset: int = 0):
+def built_eval_doc(results: Tuple, event_types: List, arg_finder: int = 0, nested_offset: int = 20, example_offset: int = 0):
     entity_offset = 1000
     output_lines = []
 
@@ -678,8 +678,15 @@ def built_eval_doc_sorted(results: Tuple, event_types: List, arg_finder: int = 0
                         tag_types[tag_type] = 1
                     # check if argument is an entity
                     entity_argument = [e for e in example.entities if
-                                       "".join(example.tokens[e.start:e.end]).strip() == tag_name.strip()
-                                       and e not in banned_entities]
+                                       "".join(example.tokens[e.start:e.end]).strip() == tag_name.strip()]
+
+                    #if possible take one of the not banned entities
+                    if entity_argument:
+                        x = [e for e in entity_argument if e not in banned_entities]
+                        if x:
+                            entity_argument = x
+                        else:
+                            banned_entities = []
 
                     if entity_argument:
                         arg = argument_finder(event=False,
@@ -702,11 +709,17 @@ def built_eval_doc_sorted(results: Tuple, event_types: List, arg_finder: int = 0
                                                       tag_type=tag_type)
                         continue
 
-                    unfiltered_event_argument = [e for e in sorted_events if
-                                                 "".join(example.tokens[e[0][2]:e[0][3]]).strip() == tag_name.strip()]
-                    event_argument = [e for e in unfiltered_event_argument
-                                      if e not in [e for e in banned_events.keys()
-                                                   if banned_events[e] >= 0]]
+                    event_argument = [e for e in sorted_events if
+                                      "".join(example.tokens[e[0][2]:e[0][3]]).strip() == tag_name.strip()
+                                      and e[0] not in events
+                                      #and (e[0][0], e[0][2], e[0][3]) != (event_name, rel_start, rel_end)
+                                      ]
+
+                    if event_argument:
+                        x = [e for e in event_argument if e[0] not in [e for e in banned_events.keys() if banned_events[e] <= 0]]
+                        if x:
+                            event_argument = x
+
 
                     if event_argument:
                         arg = argument_finder(event=True,
@@ -715,9 +728,11 @@ def built_eval_doc_sorted(results: Tuple, event_types: List, arg_finder: int = 0
                                               rel_start=rel_start,
                                               rel_end=rel_end,)
 
-                        #check for banned event
+                        # check for banned event
                         try:
                             banned_events[arg[0]] -= 1
+                            if banned_events[arg[0]] <= 0:
+                                banned_events[arg[0]] = len(arg) - 1
                         except KeyError:
                             banned_events[arg[0]] = len(arg) - 1
 
@@ -732,113 +747,19 @@ def built_eval_doc_sorted(results: Tuple, event_types: List, arg_finder: int = 0
                                                       nested_offset=nested_offset,
                                                       sorted_events=sorted_events)
                     else:
+                        string_args = ""
                         arg_not_found_error += 1
                         continue
                 else:
+                    string_args = ""
                     tag_len_error += 1
                     continue
             # create event line with the corresponding argument
             output_lines.append(
-                f'E{entity_offset + ev_idx + nested_offset * guid + example_offset}\t{tags[0][0]}:T{entity_offset + guid + example_offset}{string_args}\n')
+                                f'E{entity_offset + ev_idx + nested_offset * guid + example_offset}\t{tags[0][0]}'
+                                f':T{entity_offset + guid + example_offset}{string_args}\n'
+            )
     return output_lines, example_offset
-
-
-def built_eval_doc(results: List, event_types: List, arg_finder: int = 0):
-    entity_offset = 400
-    output_lines = []
-
-    # logging stats
-    format_error = 0
-    type_error = 0
-    arg_not_found_error = 0
-    tag_len_error = 0
-
-    example_offset = 0
-
-    # all predictions from all sentences
-    for pred_tuple in results:
-        pred_events, example = pred_tuple
-        # parse all events only once for the output file
-        for event in pred_events:
-            event_name, tags, rel_start, rel_end = event
-
-            # check for format error
-            if len(tags) == 0 or len(tags[0]) > 1:
-                # we do not have a tag for the entity type
-                format_error += 1
-                continue
-
-            # check for type error
-            if tags[0][0].strip() in event_types or not event_types:
-
-                # add offset to start and end value
-                start = rel_start + example.offset
-                end = rel_end + example.offset
-
-                # create an event trigger line for every event found
-                output_lines.append(
-                    f'T{entity_offset + pred_events.index(event) + example_offset}\t{tags[0][0]} {start} {end}\t{event_name}\n')
-            else:
-                type_error += 1
-                continue
-
-            string_args = ''
-            tag_types = {}
-
-            # create an event line for every found event in output string
-            for tag in tags[1:]:
-                if len(tag) == 2:
-                    tag_name, tag_type = tag
-                    if tag_type in tag_types.keys():
-                        tag_types[tag_type] += 1
-                    else:
-                        tag_types[tag_type] = 1
-                    # check if argument is an entity
-                    entity_argument = [e for e in example.entities if
-                                       "".join(example.tokens[e.start:e.end]).strip() == tag_name.strip()]
-                    event_argument = [e for e in pred_events if
-                                      "".join(example.tokens[e[2]:e[3]]).strip() == tag_name.strip()]
-                    if entity_argument:
-                        if arg_finder == 0:
-                            arg = closest_arg_finder(entity_argument, rel_start, rel_end)
-                        elif arg_finder == 1:
-                            arg = furthest_arg_finder(entity_argument, rel_start, rel_end)
-                        elif arg_finder == 2:
-                            new_arg_finder = [e for e in example.events if
-                                              tags[0][0].strip() == e.type and
-                                              rel_start == e.start and
-                                              rel_end == e.end and
-                                              event_name == "".join(e.text)]
-                            arg = perfect_arg_finder(new_arg_finder, tag_name, tag_type, example.entities, example.tokens)
-                        else:
-                            arg = random_arg_finder(entity_argument)
-
-                        # append argument
-                        if tag_types[tag_type] < 2:
-                            string_args += " " + tag_type + ':' + arg.id.split('_')[-1]
-                        else:
-                            string_args += " " + tag_type + str(tag_types[tag_type]) + ':' + arg.id.split('_')[-1]
-                    elif event_argument:
-                        string_args = create_event_argument(string_args=string_args,
-                                                            event_argument=event_argument,
-                                                            rel_start=rel_start,
-                                                            rel_end=rel_end,
-                                                            tag_types=tag_types,
-                                                            tag_type=tag_type,
-                                                            arg_finder=arg_finder,
-                                                            entity_offset=entity_offset,
-                                                            pred_events=pred_events,
-                                                            example_offset=example_offset)
-                    else:
-                        arg_not_found_error += 1
-                        continue
-                else:
-                    tag_len_error += 1
-                    continue
-            # create event line with the corresponding argument
-            output_lines.append(
-                f'E{entity_offset + pred_events.index(event) + example_offset}\t{tags[0][0]}:T{entity_offset + pred_events.index(event)+ example_offset}{string_args}\n')
-        example_offset += len(example.events)
 
 
 def del_duplicates(output_lines):
@@ -865,28 +786,24 @@ def del_duplicates(output_lines):
             # check for max. two themes
             if len(themes) > 2:
                 if themes[1].startswith(':E'):
-                    if not [k for k in output_lines if k.startswith(themes[1][1:5])]:
+                    if not [k for k in output_lines if k.startswith(themes[1][1:6])]:
                         output_lines.remove(line)
                         continue
                 if themes[2].startswith(':E'):
-                    if not [k for k in output_lines if k.startswith(themes[2][1:5])]:
+                    if not [k for k in output_lines if k.startswith(themes[2][1:6])]:
                         output_lines.remove(line)
                         continue
             # check for one theme
             elif len(themes) > 1 and themes[1].startswith(':E'):
-                if not [k for k in output_lines if k.startswith(themes[1][1:5])]:
+                if not [k for k in output_lines if k.startswith(themes[1][1:6])]:
                     output_lines.remove(line)
                     continue
             # check for cause
             if len(cause) > 1 and cause[1].startswith('E'):
-                if not [k for k in output_lines if k.startswith(cause[1][0:4])]:
+                if not [k for k in output_lines if k.startswith(cause[1][0:5])]:
                     output_lines.remove(line)
                     continue
     return output_lines
-
-
-def event_arg_finder(arguments: List, event: Tuple, events_lines: List):
-    print(-1)
 
 
 def closest_arg_finder(arguments, rel_start: int, rel_end: int):
@@ -909,17 +826,19 @@ def closest_arg_finder(arguments, rel_start: int, rel_end: int):
 
 def furthest_arg_finder(arguments, rel_start: int, rel_end: int):
     if type(arguments[0]) is not Entity:
-        min_arg = min(arguments,
+        min_arg = max(arguments,
                       key=lambda x:
-                      min(filter(lambda i: i > 0,
-                                 [rel_end - int(x[0][2]), int(x[0][3]) - rel_start]),
-                          default=float("inf")))
+                      max(filter(lambda i: i > 0,
+                                 [int(x[0][2]) - rel_end,
+                                  rel_start - int(x[0][3])]),
+                          default=-float("inf")))
     else:
-        min_arg = min(arguments,
+        min_arg = max(arguments,
                       key=lambda x:
-                      min(filter(lambda i: i > 0,
-                                 [rel_end - int(x.start), int(x.end) - rel_start]),
-                          default=float("inf")))
+                      max(filter(lambda i: i > 0,
+                                 [int(x.start) - rel_end,
+                                  rel_start - int(x.end)]),
+                          default=-float("inf")))
     return min_arg
 
 

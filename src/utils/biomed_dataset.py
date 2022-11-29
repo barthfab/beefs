@@ -47,7 +47,8 @@ class SingleBioEventDataset(Dataset):
                 bucket.append(random.choice(example_list['None']))
 
         # fill the rest of the bucket with random examples
-        bucket.extend(random.sample([e for e in filler + example_list['None'] if e not in bucket], k=self.example_size - len(bucket)))
+        if self.example_size - len(bucket) > 0:
+            bucket.extend(random.sample([e for e in filler + example_list['None'] if e not in bucket], k=self.example_size - len(bucket)))
 
         random.shuffle(bucket)
         return bucket

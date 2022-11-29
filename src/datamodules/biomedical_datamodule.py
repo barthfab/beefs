@@ -234,29 +234,30 @@ class SingleDataset(LightningDataModule):
                                             relations=dataset['relations'],
                                             offset=s_t,
                                             )
-                    # add natural language description and dataset name
-                    example.nld = self.nld
-                    example.builder_name = complete_dataset.builder_name
+                    if example:
+                        # add natural language description and dataset name
+                        example.nld = self.nld
+                        example.builder_name = complete_dataset.builder_name
 
-                    # check if example is usable for experiment according to prompt restrictions
-                    example_event_types = []
+                        # check if example is usable for experiment according to prompt restrictions
+                        example_event_types = []
 
-                    # get number of event types
-                    for event in example.events:
-                        if event.type not in example_event_types:
-                            example_event_types.append(event.type)
+                        # get number of event types
+                        for event in example.events:
+                            if event.type not in example_event_types:
+                                example_event_types.append(event.type)
 
-                    # create input and output sentences for prompt
-                    create_input_example(example,
-                                         self.nld,
-                                         entity_type=self.hparams.entity_type,
-                                         blocked_entities=self.hparams.blocked_entities,
-                                         task='ee')
-                    create_output_example(example,
-                                          self.nld,
-                                          blocked_entities=self.hparams.blocked_entities,
-                                          task='ee')
-                    examples.append(example)
+                        # create input and output sentences for prompt
+                        create_input_example(example,
+                                             self.nld,
+                                             entity_type=self.hparams.entity_type,
+                                             blocked_entities=self.hparams.blocked_entities,
+                                             task='ee')
+                        create_output_example(example,
+                                              self.nld,
+                                              blocked_entities=self.hparams.blocked_entities,
+                                              task='ee')
+                        examples.append(example)
 
                     # update passage offset
                     s_t = cal_offset(s_t, passage_text.split(sentence)[-1], sentence)
