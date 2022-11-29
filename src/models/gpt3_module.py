@@ -3,8 +3,7 @@ from typing import Any, List
 from datetime import datetime
 from tqdm import tqdm
 import pytorch_lightning as pl
-from src.utils.example_creators import parse_output_sentence_char, built_eval_doc, sort_nested_events, \
-    built_eval_doc_sorted, write_eval_file
+from src.utils.example_creators import parse_output_sentence_char, built_eval_doc, sort_nested_events, write_eval_file
 from src.utils.event_evaluation import event_eval
 
 
@@ -88,10 +87,10 @@ class Gpt3(pl.LightningModule):
                 example_offsets[example.id.split('_')[0]] = 0
 
             # build the evaluation files for the eval script
-            file_lines, example_offset = built_eval_doc_sorted((pred, example),
-                                                               event_types=[],
-                                                               arg_finder=self.arg_finder,
-                                                               example_offset=example_offsets[example.id.split('_')[0]])
+            file_lines, example_offset = built_eval_doc((pred, example),
+                                                        event_types=[],
+                                                        arg_finder=self.arg_finder,
+                                                        example_offset=example_offsets[example.id.split('_')[0]])
 
             example_offsets[example.id.split('_')[0]] += len(pred) * nested_offset
 
