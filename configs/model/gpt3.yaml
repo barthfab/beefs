@@ -33,3 +33,5 @@ frequency_penalty: 0
 stop: "\n"
 
 arg_finder: 0
+
+api_key: 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

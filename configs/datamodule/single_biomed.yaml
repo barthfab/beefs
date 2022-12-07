@@ -15,6 +15,6 @@ split: validation
 
 
 batch_size: 1
-example_size: 17
+example_size: 7
 num_workers: 0
 pin_memory: False

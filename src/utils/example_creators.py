@@ -9,7 +9,7 @@ from typing import Tuple, List, Dict
 from src.utils.example_classes import Event, Argument, Entity, Relation, Example
 
 
-PATH = Path(__file__).parent.parent.parent.resolve()
+PATH = Path(__file__).parents[2].resolve()
 
 
 def create_input_example(example: Example, nld_args, blocked_entities: str = '', entity_type: bool = False,
@@ -45,7 +45,8 @@ def create_input_example(example: Example, nld_args, blocked_entities: str = '',
         example.input_tokens = ''.join(example.tokens)
 
 
-def create_output_example(example: Example, nld_args, blocked_entities: str = '', task: str = 'ee'):
+def create_output_example(example: Example, nld_args, blocked_entities: str = '', task: str = 'ee',
+                          events_only: bool = False):
     """
     Get output in augmented natural language, for example:
 
@@ -473,6 +474,7 @@ def augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], i
     ))
 
 
+
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 def expand_tokens(tokens: List[str], augmentations: List[Tuple[List[tuple], int, int]],
@@ -557,6 +559,8 @@ def parse_example(sentence, example_id, events, entities, relations, offset: int
     for event in events:
         example_arguments = []
         for argument in event['arguments']:
+            if argument['ref_id'].split('_')[-1].startswith('T') and argument['ref_id'] not in [e.id for e in example_entities]:
+                return None
             example_arguments.append(Argument(
                 role=argument['role'],
                 ref_id=argument['ref_id']

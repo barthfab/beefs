@@ -5,7 +5,7 @@ nld:
   end_entity_token: ']'
   query_separator_token: ':'
   example_separator: '###'
-  head: 'Convert this text:'
+  head: 'Convert:'
   example_head: 'Example: '
   output_head: 'Output: '
 

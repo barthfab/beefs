@@ -1,19 +1,23 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, BloomTokenizerFast
 from typing import Any, List
 from datetime import datetime
 from tqdm import tqdm
+import torch
 import pytorch_lightning as pl
 from src.utils.example_creators import parse_output_sentence_char, built_eval_doc, sort_nested_events, write_eval_file
 from src.utils.event_evaluation import event_eval
+from petals.client import DistributedBloomForCausalLM
 
 
 class Opt(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
-        self.model = AutoModelForCausalLM.from_pretrained(kwargs['model'])
-        self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model'])
-        self.model.to(kwargs['device'])
-        self.tokenizer.to(kwargs['device'])
+        if 'bloom' in kwargs['model']:
+            self.tokenizer = BloomTokenizerFast.from_pretrained(kwargs['model'], padding_side='right')
+            self.model = DistributedBloomForCausalLM.from_pretrained(kwargs['model'])
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(kwargs['model'])
+            self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model'])
         try:
             self.output = kwargs['output']
         except:
@@ -23,14 +27,24 @@ class Opt(pl.LightningModule):
         except:
             self.arg_finder = 0
 
-    def forward(self, prompt: str):
+    def forward(self, prompt):
         inputs = self.tokenizer(prompt, return_tensors="pt")
-        generate_ids = self.model.generate(inputs.input_ids, max_length=len(inputs.input_ids) + 40 * 2)
-        output = self.tokenizer.batch_decode(generate_ids,
-                                             attention_mask=inputs.attention_mask,
-                                             skip_special_tokens=True,
-                                             clean_up_tokenization_spaces=False)[0]
-        output_prompt = output.split(prompt)[-1].split('\n')[0]
+        inputs = inputs.to(self.device)
+        if inputs.input_ids.size(dim=1) + 40 * 2 < 2024:
+            generate_ids = self.model.generate(inputs.input_ids,
+                                               attention_mask=inputs.attention_mask,
+                                               max_length=inputs.input_ids.size(dim=1) + 40 * 2)
+            output = self.tokenizer.batch_decode(generate_ids,
+                                                 attention_mask=inputs.attention_mask,
+                                                 skip_special_tokens=True,
+                                                 clean_up_tokenization_spaces=False)[0]
+            prompt = self.tokenizer.batch_decode(inputs.input_ids,
+                                                 attention_mask=inputs.attention_mask,
+                                                 skip_special_tokens=True,
+                                                 clean_up_tokenization_spaces=False)[0]
+            output_prompt = output.split(prompt)[-1].split('\n')[0]
+        else:
+            output_prompt = ""
         return output_prompt
 
     def step(self, batch: Any):

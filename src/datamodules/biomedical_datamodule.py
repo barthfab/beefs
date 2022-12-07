@@ -10,6 +10,9 @@ from segtok import segmenter
 from src.utils.example_classes import Example
 from src.utils.example_creators import create_output_example, create_input_example, parse_example, cal_offset, sort_examples_by_event_type
 from src.utils.biomed_dataset import SingleBioEventDataset
+from pathlib import Path
+
+PATH = Path(__file__).parents[3].resolve()
 
 
 class SingleDataset(LightningDataModule):
@@ -53,6 +56,7 @@ class SingleDataset(LightningDataModule):
             batch_size: int = 1,
             num_workers: int = 0,
             pin_memory: bool = False,
+            tokenizer: str = None,
 
     ):
         super().__init__()
@@ -64,6 +68,8 @@ class SingleDataset(LightningDataModule):
         self.data_train: Optional[Dataset] = None
         self.data_val: Optional[Dataset] = None
         self.data_test: Optional[Dataset] = None
+
+        self.bigbio_path = Path.joinpath(PATH, 'biomedical', 'bigbio', 'biodatasets', self.hparams.data_set)
 
         if nld:
             self.nld = nld['nld']
@@ -87,7 +93,7 @@ class SingleDataset(LightningDataModule):
 
         Do not use it to assign state (self.x = y).
         """
-        datasets.load_dataset(self.hparams.data_set, name=f"{self.hparams.data_set}_bigbio_kb", split=self.hparams.split)
+        datasets.load_dataset(str(self.bigbio_path), name=f"{self.hparams.data_set}_bigbio_kb", split=self.hparams.split)
 
     def setup(self, stage: Optional[str] = None):
         """Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
@@ -99,13 +105,13 @@ class SingleDataset(LightningDataModule):
         if not self.data_train and not self.data_val and not self.data_test:
             # get examples for all datasets separately
 
-            complete_dataset = datasets.load_dataset(self.hparams.data_set,
+            complete_dataset = datasets.load_dataset(str(self.bigbio_path),
                                                      name=f"{self.hparams.data_set}_bigbio_kb",
                                                      split=self.hparams.split)
 
             example, entity_type, event_type, relation_type = self.get_all_examples(complete_dataset)
 
-            complete_train_dataset = datasets.load_dataset(self.hparams.data_set,
+            complete_train_dataset = datasets.load_dataset(str(self.bigbio_path),
                                                            name=f"{self.hparams.data_set}_bigbio_kb",
                                                            split='train')
 

@@ -1,6 +1,6 @@
 _target_: src.models.opt_module.Opt
 
 
-model: "facebook/opt-30b"
+model: "bigscience/bloom-petals"
 
 arg_finder: 0

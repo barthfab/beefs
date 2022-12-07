@@ -20,7 +20,7 @@ class event_eval:
         self.evaluated_path = Path.joinpath(PATH, out_files, 'evaluated')
 
         # path of the gold files
-        self.source = Path.joinpath(PATH, source_files, builder_name)
+        self.source = Path.joinpath(PATH.parent, source_files, builder_name)
 
         # dataset name
         self.builder_name = builder_name
