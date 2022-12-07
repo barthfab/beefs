@@ -57,6 +57,7 @@ class SingleDataset(LightningDataModule):
             num_workers: int = 0,
             pin_memory: bool = False,
             tokenizer: str = None,
+            events_only: bool = False,
 
     ):
         super().__init__()
@@ -262,7 +263,8 @@ class SingleDataset(LightningDataModule):
                         create_output_example(example,
                                               self.nld,
                                               blocked_entities=self.hparams.blocked_entities,
-                                              task='ee')
+                                              task='ee',
+                                              events_only=self.hparams.events_only)
                         examples.append(example)
 
                     # update passage offset

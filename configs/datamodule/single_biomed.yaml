@@ -13,6 +13,9 @@ no_event_threshold: 0.2
 entity_type: True
 split: validation
 
+# NLD should be that only the events will be predicted
+events_only: True
+
 
 batch_size: 1
 example_size: 7

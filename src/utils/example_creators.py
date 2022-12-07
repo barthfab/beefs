@@ -83,12 +83,22 @@ def create_output_example(example: Example, nld_args, blocked_entities: str = ''
             augmentations.append(([(entity.type,)], entity.start, entity.end))
 
     # append output sentence of example and insert annotation
-    example.output_tokens = augment_sentence(list(example.tokens),
-                                             augmentations,
-                                             nld_args.begin_entity_token,
-                                             nld_args.separator_token,
-                                             nld_args.relation_separator_token,
-                                             nld_args.end_entity_token, )
+    if not events_only:
+        example.output_tokens = augment_sentence(list(example.tokens),
+                                                 augmentations,
+                                                 nld_args.begin_entity_token,
+                                                 nld_args.separator_token,
+                                                 nld_args.relation_separator_token,
+                                                 nld_args.end_entity_token, )
+    else:
+        example.output_tokens = solo_event_augment_sentence(list(example.tokens),
+                                                            augmentations,
+                                                            nld_args.begin_entity_token,
+                                                            nld_args.separator_token,
+                                                            nld_args.relation_separator_token,
+                                                            nld_args.end_entity_token, )
+
+
 
 
 def single_prompt_parser(examples, nld_args):
