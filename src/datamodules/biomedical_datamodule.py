@@ -1,4 +1,4 @@
-import random
+#import random
 import datasets
 
 from typing import Any, Dict, Optional, Tuple, List
@@ -56,8 +56,8 @@ class SingleDataset(LightningDataModule):
             batch_size: int = 1,
             num_workers: int = 0,
             pin_memory: bool = False,
-            tokenizer: str = None,
             events_only: bool = False,
+            skip_oos_examples: bool = False,
 
     ):
         super().__init__()
@@ -83,7 +83,11 @@ class SingleDataset(LightningDataModule):
                         'output_head': 'Output: ',
                         'example_head': 'Example: ',
                         'head': 'Convert this text:',
-                        'example_separator': '###'}
+                        'example_separator': '###',
+                        'replace': False,
+                        'skip_example_with_special_token': False}
+
+
 
     @property
     def num_classes(self):
@@ -110,11 +114,11 @@ class SingleDataset(LightningDataModule):
                                                      name=f"{self.hparams.data_set}_bigbio_kb",
                                                      split=self.hparams.split)
 
-            example, entity_type, event_type, relation_type = self.get_all_examples(complete_dataset)
-
             complete_train_dataset = datasets.load_dataset(str(self.bigbio_path),
                                                            name=f"{self.hparams.data_set}_bigbio_kb",
                                                            split='train')
+
+            example, entity_type, event_type, relation_type = self.get_all_examples(complete_dataset)
 
             train_example, _, train_event_type, _ = self.get_all_examples(complete_train_dataset)
 
@@ -229,10 +233,15 @@ class SingleDataset(LightningDataModule):
                     if len(sentence) == 0:
                         continue
                     if self.nld['skip_example_with_special_token']:
-                        if self.nld['begin_entity_token'] in sentences \
-                                or self.nld['end_entity_token'] in sentences:
+                        if self.nld['begin_entity_token'] in sentence or self.nld['end_entity_token'] in sentence:
                             s_t = cal_offset(s_t, passage_text.split(sentence)[-1], sentence)
                             continue
+                    if self.nld['replace']:
+                        if self.nld['begin_entity_token'] in sentence or self.nld['end_entity_token'] in sentence:
+                            sentence = sentence.replace(self.nld['begin_entity_token'],
+                                                        self.nld['reformat_begin_entity_token'])
+                            sentence = sentence.replace(self.nld['end_entity_token'],
+                                                        self.nld['reformat_end_entity_token'])
                     # create example from given sentence
                     example = parse_example(sentence=sentence,
                                             example_id=dataset['document_id'] + f"_{guid}",
@@ -240,6 +249,7 @@ class SingleDataset(LightningDataModule):
                                             entities=dataset['entities'],
                                             relations=dataset['relations'],
                                             offset=s_t,
+                                            skip_oos_examples=self.hparams.skip_oos_examples,
                                             )
                     if example:
                         # add natural language description and dataset name

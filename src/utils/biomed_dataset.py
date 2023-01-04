@@ -8,7 +8,6 @@ class SingleBioEventDataset(Dataset):
     def __init__(self, data, train_data, nld, example_size: int = 1, learning_method: str = None, no_event_threshold: float = 0.2,
                  ):
         super().__init__()
-        #todo use train data to fill bucket and dev data for prediction
         self.data = data
         self.train_data = train_data
         self.filler = [e for event_type in self.train_data.values() for e in event_type]
@@ -52,25 +51,3 @@ class SingleBioEventDataset(Dataset):
 
         random.shuffle(bucket)
         return bucket
-
-
-class BioEventDataset(Dataset):
-    def __init__(self, prompts, nld):
-        super().__init__()
-        # get train data
-        self.data = prompts
-        self.nld = {'begin_entity_token': nld.begin_entity_token,
-                    'separator_token': nld.separator_token,
-                    'relation_separator_token': nld.relation_separator_token,
-                    'end_entity_token': nld.end_entity_token,
-                    'query_separator_token': nld.query_separator_token,
-                    'output_head': nld.output_head,
-                    'example_head': nld.example_head,
-                    'head': nld.head,
-                    'example_separator': nld.example_separator}
-
-    def __getitem__(self, item):
-        return self.data[item], self.nld
-
-    def __len__(self):
-        return len(self.data)

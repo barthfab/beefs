@@ -1,0 +1,26 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=bloom_events_only
+
+defaults:
+  - override /datamodule: biomedical.yaml
+  - override /model: bloom.yaml
+  - override /trainer: cpu.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+ckpt_path: " "
+
+tags: ["bloom", "biomedical_event_extraction", "events_only", "bionlp_st_2013_pc"]
+
+datamodule:
+  data_set: bionlp_st_2013_pc
+
+seed: 12345
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ""

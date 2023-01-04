@@ -1,54 +1,36 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, BloomTokenizerFast
+from pychatgpt import Chat
 from typing import Any, List
 from datetime import datetime
 from tqdm import tqdm
-import torch
 import pytorch_lightning as pl
 from src.utils.example_creators import parse_output_sentence_char, built_eval_doc, sort_nested_events, write_eval_file
 from src.utils.a2_evaluation_class import event_eval
-from petals.client import DistributedBloomForCausalLM
 
 
-class Opt(pl.LightningModule):
-    def __init__(self, **kwargs):
+class ChatGpt(pl.LightningModule):
+    def __init__(self, name, pswd, temperature, top_p, n, stream,
+                 logprobs, presence_penalty, frequency_penalty, stop, api_key, output: str = 'logs/train_result', arg_finder=0):
         super().__init__()
-        if 'bloom' in kwargs['model']:
-            self.tokenizer = BloomTokenizerFast.from_pretrained(kwargs['model'], padding_side='right')
-            self.model = DistributedBloomForCausalLM.from_pretrained(kwargs['model']).cuda()
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(kwargs['model'])
-            self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model'])
-        try:
-            self.output = kwargs['output']
-        except:
-            self.output = 'logs/train_result'
-        try:
-            self.arg_finder = kwargs['arg_finder']
-        except:
-            self.arg_finder = 0
+        self.name = name
+        self.pswd = pswd
 
-    def forward(self, prompt):
-        inputs = self.tokenizer(prompt, return_tensors="pt")
-        inputs = inputs.to(self.device)
-        if inputs.input_ids.size(dim=1) + 40 < 2024:
-            generate_ids = self.model.generate(inputs.input_ids,
-                                               attention_mask=inputs.attention_mask,
-                                               max_length=inputs.input_ids.size(dim=1) + 40)
-            output = self.tokenizer.batch_decode(generate_ids,
-                                                 attention_mask=inputs.attention_mask,
-                                                 skip_special_tokens=True,
-                                                 clean_up_tokenization_spaces=False)[0]
-            output_prompt = output.split(prompt)[-1].split('\n')[0]
-        else:
-            output_prompt = ""
-        return output_prompt
+
+    def forward(self, x: str):
+        chat = Chat(email=self.name, password=self.pswd)
+        answer = chat.ask(x)
+        return answer
+
+    def debug_step(self, batch: any):
+        x, y = batch
+        return y.output_tokens, x, y
 
     def step(self, batch: Any):
         x, y = batch
         output_prompt = self.forward(x)
-        return output_prompt, x, y
+        return output_prompt.choices.text, x, y
 
     def training_step(self, batch: Any, batch_idx: int):
+        #todo
         prompt_choices, input_prompt, example = self.step(batch)
         return {"output_prompt": prompt_choices, "input_prompt": input_prompt, "example": example}
 
@@ -68,6 +50,7 @@ class Opt(pl.LightningModule):
         return {"output_prompt": prompt_choices, "input_prompt": input_prompt, "example": example}
 
     def test_epoch_end(self, outputs: List[Any]):
+        # todo safe all found events in a dict
         global_rec_error = 0
         nested_offset = 20
         output_dir = self.output + f"/{datetime.today().strftime('%Y-%m-%d-%H-%M')}"
@@ -110,6 +93,7 @@ class Opt(pl.LightningModule):
             self.log("val/f1", f1, on_epoch=True)
             self.log("val/precision", prec, on_epoch=True)
             self.log("val/recall", rec, on_epoch=True)
+            #todo safe all found events in a dict
 
     def configure_optimizers(self):
         return None

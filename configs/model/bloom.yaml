@@ -1,4 +1,4 @@
-_target_: src.models.opt_module.Opt
+_target_: src.models.bloom_module.Bloom
 
 
 model: "bigscience/bloom-petals"

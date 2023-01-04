@@ -3,8 +3,7 @@ from typing import Any, List
 from datetime import datetime
 from tqdm import tqdm
 import pytorch_lightning as pl
-from src.utils.example_creators import parse_output_sentence_char, built_eval_doc, sort_nested_events, write_eval_file
-from src.utils.event_evaluation import event_eval
+from src.utils.eval import a2_evaluation, local_eval
 
 
 class Gpt3(pl.LightningModule):
@@ -23,6 +22,10 @@ class Gpt3(pl.LightningModule):
         self.stop = stop
         self.output = output
         self.arg_finder = arg_finder
+        try:
+            self.local_eval = local_eval
+        except:
+            self.local_eval = True
         openai.api_key = api_key
 
     def forward(self, x: str):
@@ -69,49 +72,15 @@ class Gpt3(pl.LightningModule):
 
     def test_epoch_end(self, outputs: List[Any]):
         # todo safe all found events in a dict
-        global_rec_error = 0
-        nested_offset = 20
-        output_dir = self.output + f"/{datetime.today().strftime('%Y-%m-%d-%H-%M')}"
-        example_offsets = {}
-        for output in tqdm(outputs):
-            output_prompt = output['output_prompt']
-            example = output['example']
+        if self.local_eval:
+            f1, prec, rec = local_eval(outputs, self.output, self.arg_finder)
+        else:
+            f1, prec, rec = a2_evaluation(outputs, self.output, self.arg_finder)
 
-            # extract all generated events
-            pred, rec_error, rec_sentence = parse_output_sentence_char(example.tokens, output_prompt, example.nld)
+        self.log("val/f1", f1, on_epoch=True)
+        self.log("val/precision", prec, on_epoch=True)
+        self.log("val/recall", rec, on_epoch=True)
 
-            # sort output by single and nested events
-            pred = sort_nested_events(pred)
-
-            if example.id.split('_')[0] not in example_offsets.keys():
-                example_offsets[example.id.split('_')[0]] = 0
-
-            # build the evaluation files for the eval script
-            file_lines, example_offset = built_eval_doc((pred, example),
-                                                        event_types=[],
-                                                        arg_finder=self.arg_finder,
-                                                        example_offset=example_offsets[example.id.split('_')[0]])
-
-            example_offsets[example.id.split('_')[0]] += len(pred) * nested_offset
-
-            # write .a* file for evaluation
-            write_eval_file(file_lines, output_dir, example.id.split('_')[0])
-
-            # count reconstruction error
-            if rec_error:
-                global_rec_error += 1
-
-        if outputs:
-            # run corresponding evaluation script
-            evaluator = event_eval(out_files=output_dir,
-                                   builder_name=outputs[0]['example'].builder_name,
-                                   split='devel')
-
-            f1, prec, rec, unresolved_files = evaluator.eval()
-            self.log("val/f1", f1, on_epoch=True)
-            self.log("val/precision", prec, on_epoch=True)
-            self.log("val/recall", rec, on_epoch=True)
-            #todo safe all found events in a dict
 
     def configure_optimizers(self):
         return None
