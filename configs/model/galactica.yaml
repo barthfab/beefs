@@ -4,3 +4,13 @@ _target_: src.models.opt_module.Opt
 model: "facebook/galactica-6.7b"
 
 arg_finder: 0
+
+local_eval: True
+
+do_sampling: True
+
+top_k: 5
+
+top_p: 0.92
+
+temperature: 0.9

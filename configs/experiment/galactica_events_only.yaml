@@ -1,0 +1,26 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=bloom_events_only
+
+defaults:
+  - override /datamodule: single_biomed.yaml
+  - override /model: galactica.yaml
+  - override /trainer: gpu.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+ckpt_path: " "
+
+tags: ["galactica", "biomedical_event_extraction", "events_only", "bionlp_st_2013_pc", "Phos,Reg,Pos,Neg", "subsample20"]
+
+datamodule:
+  data_set: bionlp_st_2013_pc
+
+seed: 42
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: ""
