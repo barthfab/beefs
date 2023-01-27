@@ -1,15 +1,15 @@
 nld:
   begin_entity_token: '['
-  separator_token: '|'
-  relation_separator_token: '='
+  separator_token: 'of'
+  relation_separator_token: 'and'
   end_entity_token: ']'
-  query_separator_token: ':'
+  query_separator_token: 'by'
   example_separator: '###'
-  head: 'Extract Events:'
-  example_head: 'Example: '
-  output_head: 'Events: '
+  head: 'Convert:'
+  example_head: 'Input: '
+  output_head: 'Output: '
 
-  replace: False
+  replace: True
   skip_example_with_special_token: True
   reformat_begin_entity_token: '('
   reformat_end_entity_token: ')'

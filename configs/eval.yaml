@@ -10,9 +10,15 @@ defaults:
   - extras: default.yaml
   - hydra: default.yaml
 
+  # experiment configs allow for version control of specific hyperparameters
+  # e.g. best hyperparameters for given model and datamodule
+  - experiment: null
+
 task_name: "eval"
 
 tags: ["dev"]
+
+seed: 42
 
 # passing checkpoint path is necessary for evaluation
 ckpt_path: ???

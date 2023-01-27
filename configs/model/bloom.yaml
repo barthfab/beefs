@@ -3,4 +3,20 @@ _target_: src.models.bloom_module.Bloom
 
 model: "bigscience/bloom-petals"
 
-arg_finder: 0
+arg_finder: 3
+
+local_eval: True
+
+do_sampling: False
+
+top_k: 0
+
+#top_p: 0.92
+
+temperature: 0
+
+num_beams: 1
+
+num_return_sequences: ${model.num_beams}
+
+early_stopping: False
