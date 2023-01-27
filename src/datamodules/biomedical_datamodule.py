@@ -46,6 +46,7 @@ class SingleDataset(LightningDataModule):
     def __init__(
             self,
             data_set,
+            seed,
             nld: Dict = None,
             entity_type: bool = False,
             blocked_entities: str = '',
@@ -56,12 +57,13 @@ class SingleDataset(LightningDataModule):
             batch_size: int = 1,
             num_workers: int = 0,
             pin_memory: bool = False,
-            events_only: bool = False,
+            events_only: int = 0,
+            event_types: str = 'all',
             skip_oos_examples: bool = False,
 
     ):
         super().__init__()
-
+        self.seed = seed
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
@@ -71,7 +73,7 @@ class SingleDataset(LightningDataModule):
         self.data_test: Optional[Dataset] = None
 
         self.bigbio_path = Path.joinpath(PATH, 'biomedical', 'bigbio', 'biodatasets', self.hparams.data_set)
-
+        self.event_types = event_types
         if nld:
             self.nld = nld['nld']
         else:
@@ -129,19 +131,22 @@ class SingleDataset(LightningDataModule):
                                                     nld=self.nld,
                                                     example_size=self.hparams.example_size,
                                                     learning_method=self.hparams.learning_method,
-                                                    no_event_threshold=self.hparams.no_event_threshold)
+                                                    no_event_threshold=self.hparams.no_event_threshold,
+                                                    seed=self.seed)
             self.data_test = SingleBioEventDataset(data=example,
                                                    train_data=sorted_train_examples,
                                                    nld=self.nld,
                                                    example_size=self.hparams.example_size,
                                                    learning_method=self.hparams.learning_method,
-                                                   no_event_threshold=self.hparams.no_event_threshold)
+                                                   no_event_threshold=self.hparams.no_event_threshold,
+                                                   seed=self.seed)
             self.data_val = SingleBioEventDataset(data=example,
                                                   train_data=sorted_train_examples,
                                                   nld=self.nld,
                                                   example_size=self.hparams.example_size,
                                                   learning_method=self.hparams.learning_method,
-                                                  no_event_threshold=self.hparams.no_event_threshold)
+                                                  no_event_threshold=self.hparams.no_event_threshold,
+                                                  seed=self.seed)
 
     def train_dataloader(self):
         return DataLoader(
@@ -212,18 +217,15 @@ class SingleDataset(LightningDataModule):
                 if relation['type'] not in relation_types:
                     relation_types.append(relation['type'])
 
+            if self.event_types == all:
+                valid_event_types = event_types
+            else:
+                valid_event_types = self.event_types.split(',')
+
             for passage in dataset['passages']:
                 # set passage offset
                 s_t = 0
-
-                # reformat sentence if begin_entity_token or end_entity_token
-                if self.nld['replace']:
-                    passage_text = passage['text'][0].replace(self.nld['begin_entity_token'],
-                                                              self.nld['reformat_begin_entity_token'])
-                    passage_text = passage_text.replace(self.nld['begin_entity_token'],
-                                                        self.nld['reformat_end_entity_token'])
-                else:
-                    passage_text = passage['text'][0]
+                passage_text = passage['text'][0]
 
                 sentences = segmenter.split_single(passage_text)
 
@@ -250,6 +252,7 @@ class SingleDataset(LightningDataModule):
                                             relations=dataset['relations'],
                                             offset=s_t,
                                             skip_oos_examples=self.hparams.skip_oos_examples,
+                                            valid_event_types=valid_event_types
                                             )
                     if example:
                         # add natural language description and dataset name

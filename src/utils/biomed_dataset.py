@@ -1,17 +1,21 @@
 import random
 from typing import List
+import math
 from torch.utils.data.dataset import Dataset
 from src.utils.example_creators import single_prompt_parser
 
 
 class SingleBioEventDataset(Dataset):
-    def __init__(self, data, train_data, nld, example_size: int = 1, learning_method: str = None, no_event_threshold: float = 0.2,
+    def __init__(self, data, train_data, nld, seed, example_size: int = 1,
+                 learning_method: str = None, no_event_threshold: float = 0.2,
                  ):
         super().__init__()
         self.data = data
         self.train_data = train_data
         self.filler = [e for event_type in self.train_data.values() for e in event_type]
         self.nld = nld
+        self.seed = seed
+        random.seed(self.seed)
 
         self.example_size = example_size
         # if random or not
@@ -21,7 +25,7 @@ class SingleBioEventDataset(Dataset):
     def __getitem__(self, item):
         example = self.data[item]
         if self.learning_method == "random":
-            bucket = random.sample(self.filler, k=self.example_size)
+            bucket = random.sample(self.filler, k=self.example_size,)
         else:
             event_types = set([e.type for e in example.events])
             if event_types:
@@ -47,7 +51,12 @@ class SingleBioEventDataset(Dataset):
 
         # fill the rest of the bucket with random examples
         if self.example_size - len(bucket) > 0:
-            bucket.extend(random.sample([e for e in filler + example_list['None'] if e not in bucket], k=self.example_size - len(bucket)))
+            not_nones = random.sample([e for e in filler if e not in bucket],
+                                      k=math.ceil((self.example_size - len(bucket)) * (1 - self.no_event_threshold)))
+            nones = random.sample([e for e in example_list['None'] if e not in bucket],
+                                  k=math.floor((self.example_size - len(bucket)) * self.no_event_threshold))
+            bucket.extend(not_nones)
+            bucket.extend(nones)
 
         random.shuffle(bucket)
         return bucket
