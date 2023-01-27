@@ -1,23 +1,19 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM, BloomTokenizerFast
 from typing import Any, List
-from datetime import datetime
-from tqdm import tqdm
-import torch
 import pytorch_lightning as pl
-from src.utils.example_creators import parse_output_sentence_char, built_eval_doc, sort_nested_events, write_eval_file
-from src.utils.a2_evaluation_class import event_eval
-from petals.client import DistributedBloomForCausalLM
+from src.utils.eval_script import a2_evaluation, local_eval
 
 
 class Opt(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
-        if 'bloom' in kwargs['model']:
-            self.tokenizer = BloomTokenizerFast.from_pretrained(kwargs['model'], padding_side='right')
-            self.model = DistributedBloomForCausalLM.from_pretrained(kwargs['model']).cuda()
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(kwargs['model'])
-            self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model'])
+        self.model = AutoModelForCausalLM.from_pretrained(kwargs['model'])
+        self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model'])
+        self.local_eval = kwargs['local_eval']
+        self.do_sampling = kwargs['do_sampling']
+        self.top_k = kwargs['top_k']
+        self.top_p = kwargs['top_p']
+        self.temperature = kwargs['temperature']
         try:
             self.output = kwargs['output']
         except:
@@ -30,16 +26,20 @@ class Opt(pl.LightningModule):
     def forward(self, prompt):
         inputs = self.tokenizer(prompt, return_tensors="pt")
         inputs = inputs.to(self.device)
-        if inputs.input_ids.size(dim=1) + 40 < 2024:
+        if inputs.input_ids.size(dim=1) + 40 <= 2048:
             generate_ids = self.model.generate(inputs.input_ids,
                                                attention_mask=inputs.attention_mask,
-                                               max_length=inputs.input_ids.size(dim=1) + 40)
+                                               max_length=inputs.input_ids.size(dim=1) + 48,
+                                               top_k=self.top_k,
+                                               temperature=self.temperature,
+                                               top_p=self.top_p,)
             output = self.tokenizer.batch_decode(generate_ids,
                                                  attention_mask=inputs.attention_mask,
                                                  skip_special_tokens=True,
                                                  clean_up_tokenization_spaces=False)[0]
             output_prompt = output.split(prompt)[-1].split('\n')[0]
         else:
+            print(f'WARNING: token length: {inputs.input_ids.size(dim=1)}')
             output_prompt = ""
         return output_prompt
 
@@ -68,48 +68,13 @@ class Opt(pl.LightningModule):
         return {"output_prompt": prompt_choices, "input_prompt": input_prompt, "example": example}
 
     def test_epoch_end(self, outputs: List[Any]):
-        global_rec_error = 0
-        nested_offset = 20
-        output_dir = self.output + f"/{datetime.today().strftime('%Y-%m-%d-%H-%M')}"
-        example_offsets = {}
-        for output in tqdm(outputs):
-            output_prompt = output['output_prompt']
-            example = output['example']
-
-            # extract all generated events
-            pred, rec_error, rec_sentence = parse_output_sentence_char(example.tokens, output_prompt, example.nld)
-
-            # sort output by single and nested events
-            pred = sort_nested_events(pred)
-
-            if example.id.split('_')[0] not in example_offsets.keys():
-                example_offsets[example.id.split('_')[0]] = 0
-
-            # build the evaluation files for the eval script
-            file_lines, example_offset = built_eval_doc((pred, example),
-                                                        event_types=[],
-                                                        arg_finder=self.arg_finder,
-                                                        example_offset=example_offsets[example.id.split('_')[0]])
-
-            example_offsets[example.id.split('_')[0]] += len(pred) * nested_offset
-
-            # write .a* file for evaluation
-            write_eval_file(file_lines, output_dir, example.id.split('_')[0])
-
-            # count reconstruction error
-            if rec_error:
-                global_rec_error += 1
-
-        if outputs:
-            # run corresponding evaluation script
-            evaluator = event_eval(out_files=output_dir,
-                                   builder_name=outputs[0]['example'].builder_name,
-                                   split='devel')
-
-            f1, prec, rec, unresolved_files = evaluator.eval()
-            self.log("val/f1", f1, on_epoch=True)
-            self.log("val/precision", prec, on_epoch=True)
-            self.log("val/recall", rec, on_epoch=True)
+        if self.local_eval:
+            f1, prec, rec = local_eval(outputs, self.arg_finder)
+        else:
+            f1, prec, rec = a2_evaluation(outputs, self.output, self.arg_finder)
+        self.log("val/f1", f1, on_epoch=True)
+        self.log("val/precision", prec, on_epoch=True)
+        self.log("val/recall", rec, on_epoch=True)
 
     def configure_optimizers(self):
         return None

@@ -1,6 +1,16 @@
 _target_: src.models.opt_module.Opt
 
 
-model: "facebook/opt-30b"
+model: "facebook/opt-2.7b"
 
 arg_finder: 0
+
+local_eval: True
+
+do_sampling: True
+
+top_k: 5
+
+top_p: 0.92
+
+temperature: 0.9
