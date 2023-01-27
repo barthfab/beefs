@@ -1,23 +1,27 @@
 _target_: src.datamodules.biomedical_datamodule.SingleDataset
 
 defaults:
-  - nld: default
+  - nld: events_only
 
 data_set: bionlp_st_2013_pc
 #entity types that should be ignored. Seperated by ','
 blocked_entities: Entity
 #random or event specific
 learning_method: 'event_spec'
-no_event_threshold: 0.2
+no_event_threshold: 0.1
 #add entity type to input example
 entity_type: True
 split: validation
 
-# NLD should be that only the events will be predicted
-events_only: True
+event_types: Phosphorylation,Regulation,Positive_regulation,Negative_regulation
 
+# 0 if plain text prediction, 1 if events only prediction, 2 if new NLD
+events_only: 1
+
+skip_oos_examples: True
 
 batch_size: 1
-example_size: 7
+example_size: 14
 num_workers: 0
 pin_memory: False
+seed: ${seed}

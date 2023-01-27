@@ -46,7 +46,7 @@ def create_input_example(example: Example, nld_args, blocked_entities: str = '',
 
 
 def create_output_example(example: Example, nld_args, blocked_entities: str = '', task: str = 'ee',
-                          events_only: bool = False):
+                          events_only: int = 0):
     """
     Get output in augmented natural language, for example:
 
@@ -57,30 +57,32 @@ def create_output_example(example: Example, nld_args, blocked_entities: str = ''
     augmentations = [([(type,), (tail.text,role), (...) ], #, #), (...)]
     """
     augmentations = []
-
-    # add event annotation for event extraction
-    if task == 'ee':
-        if events_only:
-            augmentations = get_id_augmentations(example=example)
-        else:
-            augmentations = get_plain_augmentations(example=example)
-
     # add entity annotation for entity recognition
-    elif task == 'er':
+    if task == 'er':
         blocked_entities = blocked_entities.split(',')
         for entity in example.entities:
             if entity.type in blocked_entities:
                 continue
             augmentations.append(([(entity.type,)], entity.start, entity.end))
+    if events_only < 2:
+        # add event annotation for event extraction
+        if task == 'ee':
+            if events_only == 1:
+                augmentations = get_id_augmentations(example=example)
+            else:
+                augmentations = get_plain_augmentations(example=example)
 
-    # append output sentence of example and insert annotation
-    example.output_tokens = augment_sentence(list(example.tokens),
-                                             augmentations,
-                                             nld_args['begin_entity_token'],
-                                             nld_args['separator_token'],
-                                             nld_args['relation_separator_token'],
-                                             nld_args['end_entity_token'],
-                                             events_only=events_only,)
+        # append output sentence of example and insert annotation
+            example.output_tokens = augment_sentence(list(example.tokens),
+                                                     augmentations,
+                                                     nld_args['begin_entity_token'],
+                                                     nld_args['separator_token'],
+                                                     nld_args['relation_separator_token'],
+                                                     nld_args['end_entity_token'],
+                                                     events_only=events_only,)
+    else:
+        example.output_tokens = text_events_only_augment_sentence(example=example,
+                                                                  nld_args=nld_args)
 
 
 def get_plain_augmentations(example):
@@ -266,6 +268,107 @@ def single_example_parser(prompt, example_labels, nld_args, task):
                     argument_error = True
     return examples
 
+def parse_output_sentence(example_tokens, nld_args) -> Tuple[list, bool]:
+        """
+        Parse an output sentence in augmented language and extract inferred entities and tags.
+        Return a pair (predicted_entities, wrong_reconstruction), where:
+        - each element of predicted_entities is a tuple (entity_name, tags, start, end)
+            - entity_name (str) is the name as extracted from the output sentence
+            - tags is a list of tuples, obtained by |-splitting the part of the entity after the entity name
+            - this entity corresponds to the tokens example.tokens[start:end]
+            - note that the entity_name could differ from ' '.join(example.tokens[start:end]), if the model was not
+              able to exactly reproduce the entity name, or if alignment failed
+        - wrong_reconstruction (bool) says whether the output_sentence does not match example.tokens exactly
+
+        An example follows.
+
+        example.tokens:
+        ['Tolkien', 'wrote', 'The', 'Lord', 'of', 'the', 'Rings']
+
+        output_sentence:
+        [ Tolkien | person ] wrote [ The Lord of the Rings | book | author = Tolkien ]
+
+        output predicted entities:
+        [
+            ('Tolkien', [('person',)], 0, 1),
+            ('The Lord of the Rings', [('book',), ('author', 'Tolkien')], 2, 7)
+        ]
+        """
+        output_tokens = []
+        unmatched_predicted_entities = []
+        for special_token in [nld_args['begin_entity_token'], nld_args['end_entity_token']]:
+                example_tokens = example_tokens.replace(special_token, ' ' + special_token + ' ')
+        entity_stack = []  # stack of the entities we are extracting from the output sentence
+        # this is a list of lists [start, state, entity_name_tokens, entity_other_tokens]
+        # where state is "name" (before the first | separator) or "other" (after the first | separator)
+
+        tokens = example_tokens.split()
+        for token in tokens:
+            if len(token) == 0:
+                continue
+
+            elif nld_args['begin_entity_token'] in token:
+                # begin entity
+                start = len(output_tokens)
+                entity_stack.append([start, "name", [], []])
+
+            elif nld_args['end_entity_token'] in token and len(entity_stack) > 0:
+                # end entity
+                start, state, entity_name_tokens, entity_other_tokens = entity_stack.pop()
+                entity_name = ' '.join(entity_name_tokens).strip()
+                end = len(output_tokens)
+
+                tags = []
+
+                # split entity_other_tokens by |
+                splits = [
+                    list(y) for x, y in itertools.groupby(entity_other_tokens, lambda z: z == nld_args['separator_token'])
+                    if not x
+                ]
+
+                if state == "other" and len(splits) > 0:
+                    for x in splits:
+                        tags.append(tuple(' '.join(x).split(nld_args['relation_separator_token'])))
+
+                unmatched_predicted_entities.append((entity_name, tags, start, end))
+
+            else:
+                # a normal token
+                if len(entity_stack) > 0:
+                    # inside some entities
+                    if nld_args['separator_token'] in token or nld_args['relation_separator_token'] in token:
+                        x = entity_stack[-1]
+
+                        if x[1] == "name":
+                            # this token marks the end of name tokens for the current entity
+                            x[1] = "other"
+                        else:
+                            # simply add this token to entity_other_tokens
+                            x[3].append(token)
+
+                    else:
+                        is_name_token = True
+
+                        for x in reversed(entity_stack):
+                            # check state
+                            if x[1] == "name":
+                                # add this token to entity_name_tokens
+                                x[2].append(token)
+
+                            else:
+                                # add this token to entity_other tokens and then stop going up in the tree
+                                x[3].append(token)
+                                is_name_token = False
+                                break
+
+                        if is_name_token:
+                            output_tokens.append(token)
+
+                else:
+                    # outside
+                    output_tokens.append(token)
+        return unmatched_predicted_entities, False
+
 
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -447,7 +550,7 @@ def parse_output_sentence_char(example_tokens: str, output_sentence: str, nld_ar
 # SPDX-License-Identifier: Apache-2.0
 def augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], int, int]], begin_entity_token: str,
                      sep_token: str, relation_sep_token: str, end_entity_token: str,
-                     query_separator_token:str = ':', events_only: bool = False) -> str:
+                     query_separator_token:str = ':', events_only: int = 0) -> str:
     """
     Augment a sentence by adding tags in the specified positions.
 
@@ -473,16 +576,29 @@ def augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], i
     output augmented sentence:
     [ Tolkien | person | born in = here ] was born [ here | location ]
     """
-
-    # sort entities by start position, longer entities first
-    if events_only:
-        # sort entities by start id
-        augmentations = list(sorted(augmentations, key=lambda z: z[0][0]))
-        return "".join(events_only_expand(augmentations, begin_entity_token,
-                                          sep_token, relation_sep_token, end_entity_token, query_separator_token))
+    if events_only == 0:
+        sentence = plain_text_augment_sentence(tokens,
+                                               augmentations,
+                                               begin_entity_token,
+                                               sep_token,
+                                               relation_sep_token,
+                                               end_entity_token,
+                                               query_separator_token)
     else:
-        # sort entities by start position, longer entities first
-        augmentations = list(sorted(augmentations, key=lambda z: (z[1], -z[2])))
+        sentence = events_only_augment_sentence(augmentations,
+                                                begin_entity_token,
+                                                sep_token,
+                                                relation_sep_token,
+                                                end_entity_token,
+                                                query_separator_token)
+    return sentence
+
+
+def plain_text_augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], int, int]], begin_entity_token: str,
+                                sep_token: str, relation_sep_token: str, end_entity_token: str,
+                                query_separator_token:str = ':'):
+    # sort entities by start position, longer entities first
+    augmentations = list(sorted(augmentations, key=lambda z: (z[1], -z[2])))
 
     # check that the entities have a tree structure (if two entities overlap, then one is contained in
     # the other), and build the entity tree
@@ -511,6 +627,52 @@ def augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], i
         entity_tree[j] = []
     return ''.join(expand_tokens(tokens, augmentations, entity_tree, root,
                                  begin_entity_token, sep_token, relation_sep_token, end_entity_token,))
+
+
+def events_only_augment_sentence(augmentations: List[Tuple[List[tuple], int, int]], begin_entity_token: str,
+                                 sep_token: str, relation_sep_token: str, end_entity_token: str,
+                                 query_separator_token:str = ':'):
+    # sort entities by start id
+    augmentations = list(sorted(augmentations, key=lambda z: z[0][0]))
+    if not augmentations:
+        return 'None'
+    return "".join(events_only_expand(augmentations, begin_entity_token,
+                                      sep_token, relation_sep_token, end_entity_token, query_separator_token))
+
+
+def text_events_only_augment_sentence(example: Example, nld_args):
+    augments = set()
+    for event in example.events:
+        augments.add(gold_list(example, event, text_embed=True))
+    for augment in augments.copy():
+        for compare in augments.copy():
+            if compare != augment and augment in compare:
+                if augment in augments:
+                    augments.remove(augment)
+    output = ""
+    for augment in augments:
+        output += text_event_only_expand(augment, nld_args)
+    if not output:
+        output = "None"
+    return output
+
+
+def text_event_only_expand(augment, nld_args):
+    if isinstance(augment[0], tuple):
+        augment = augment[0]
+    prompt = nld_args['begin_entity_token'] + augment[0]
+    for guid, tag in enumerate(augment[2::2]):
+        if guid == 0:
+            filler = ' of '
+        else:
+            filler = ' and '
+        prompt += filler + tag + " "
+        if isinstance(augment[guid * 2 + 3], tuple):
+            prompt += text_event_only_expand(augment[guid * 2 + 3], nld_args)
+        else:
+            prompt += augment[guid * 2 + 3]
+    prompt += " " + 'by' + " " + augment[1] + nld_args['end_entity_token']
+    return prompt
 
 
 def events_only_expand(augmentations: List[Tuple[List[tuple], int, int]],
@@ -642,7 +804,8 @@ def compress_string(sentence: str):
     return output_string
 
 
-def parse_example(sentence, example_id, events, entities, relations, offset: int = 0, skip_oos_examples: bool = False) -> Example:
+def parse_example(sentence, example_id, events, entities, relations,
+                  offset: int = 0, skip_oos_examples: bool = False, valid_event_types: List = None) -> Example:
     example_entities = []
     example_events = []
     example_relations = []
@@ -664,12 +827,25 @@ def parse_example(sentence, example_id, events, entities, relations, offset: int
         event_ids = [e['id'] for e in reformatted_events]
         # add all events in the given sentence
         for event in reformatted_events:
-            curr_event = event_getter(event, offset, example_entities, event_ids)
-            if curr_event:
-                example_events.append(curr_event)
-            else:
-                if skip_oos_examples:
-                    return None
+            if event['type'] in valid_event_types:
+                args = False
+                for arg in event['arguments']:
+                    if arg['ref_id'].split('_')[-1].startswith('E'):
+                        event = [e for e in reformatted_events if arg['ref_id'] is e['id']]
+                        if event:
+                            if event['type'] not in valid_event_types:
+                                args = True
+                        else:
+                            args = True
+                if not args:
+                    curr_event = event_getter(event, offset, example_entities, event_ids)
+                    if curr_event:
+                        example_events.append(curr_event)
+                    else:
+                        if skip_oos_examples:
+                            return None
+        if not example_events and reformatted_events:
+            return None
 
     if relations:
         reformatted_relations = [ta for ta in events if ta['trigger']['offsets'][0][0] >= offset
@@ -693,7 +869,7 @@ def parse_example(sentence, example_id, events, entities, relations, offset: int
     )
 
 
-def event_getter(event, offset, example_entities, event_ids):
+def event_getter(event, offset, example_entities, event_ids,):
     example_arguments = []
     for argument in event['arguments']:
         if argument['ref_id'].split('_')[-1].startswith('T') and argument['ref_id'] not in [e.id for e in
@@ -713,6 +889,7 @@ def event_getter(event, offset, example_entities, event_ids):
         end=event['trigger']['offsets'][0][1] - offset,
         arguments=example_arguments,
         )
+
 
 def sort_examples_by_event_type(examples, event_types, event_type_addition) -> Dict[str, List]:
     """
@@ -1097,6 +1274,27 @@ def create_event_trigger(event, example, example_offset: int, idx: int, event_ty
         return -2
 
     return trigger
+
+
+def gold_list(example, event, text_embed: bool = False):
+    if not text_embed:
+        event_tuple = (event.type,)
+    else:
+        event_tuple = (event.type, example.tokens[event.start:event.end])
+    if not event.arguments:
+        return (event_tuple,)
+    for arg in event.arguments:
+        if arg.ref_id.split('_')[-1].startswith('E'):
+            new_event = [e for e in example.events if e.id == arg.ref_id]
+            if new_event:
+                if not text_embed:
+                    event_tuple = event_tuple + (arg.role, gold_list(example, new_event[0]))
+                else:
+                    event_tuple = event_tuple + (arg.role, gold_list(example, new_event[0], True))
+        else:
+            new_event = [e for e in example.entities if e.id == arg.ref_id][0]
+            event_tuple += (arg.role, example.tokens[new_event.start:new_event.end])
+    return event_tuple
 
 
 def collate_fn(data):

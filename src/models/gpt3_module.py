@@ -3,7 +3,7 @@ from typing import Any, List
 from datetime import datetime
 from tqdm import tqdm
 import pytorch_lightning as pl
-from src.utils.eval import a2_evaluation, local_eval
+from src.utils.eval_script import a2_evaluation, local_eval
 
 
 class Gpt3(pl.LightningModule):
@@ -73,7 +73,7 @@ class Gpt3(pl.LightningModule):
     def test_epoch_end(self, outputs: List[Any]):
         # todo safe all found events in a dict
         if self.local_eval:
-            f1, prec, rec = local_eval(outputs, self.output, self.arg_finder)
+            f1, prec, rec = local_eval(outputs, self.arg_finder)
         else:
             f1, prec, rec = a2_evaluation(outputs, self.output, self.arg_finder)
 
