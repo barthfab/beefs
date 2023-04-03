@@ -1,15 +1,14 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import LlamaForCausalLM, LlamaTokenizer
 from typing import Any, List
 import pytorch_lightning as pl
 from src.utils.eval_script import a2_evaluation, local_evaluation
 from src.utils.example_creators import down_sample_prompt
 
-
-class Opt(pl.LightningModule):
+class LLaMA(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
-        self.model = AutoModelForCausalLM.from_pretrained(kwargs['model'])
-        self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model'])
+        self.tokenizer = LlamaTokenizer.from_pretrained("decapoda-research/llama-7b-hf")
+        self.model = LlamaForCausalLM.from_pretrained("decapoda-research/llama-7b-hf")
         self.local_eval = kwargs['local_eval']
         self.do_sampling = kwargs['do_sampling']
         self.top_k = kwargs['top_k']
@@ -27,11 +26,10 @@ class Opt(pl.LightningModule):
     def step(self, batch: Any):
         prompt, example = batch
         out_len = self.tokenizer(example.output_tokens, return_tensors="pt").input_ids.size(dim=1)
-        out_len = max(out_len, 10)
+        out_len = out_len + 15
         inputs = self.tokenizer(prompt, return_tensors="pt")
         i = 0
-
-        while inputs.input_ids.size(dim=1) + out_len >= 2048:
+        while inputs.input_ids.size(dim=1) + out_len >= 4096:
             i += 1
             prompt = down_sample_prompt(example, prompt)
             inputs = self.tokenizer(prompt, return_tensors="pt")
@@ -45,10 +43,11 @@ class Opt(pl.LightningModule):
         inputs = inputs.to(self.device)
         generate_ids = self.model.generate(inputs.input_ids,
                                            attention_mask=inputs.attention_mask,
-                                           max_length=inputs.input_ids.size(dim=1) + out_len,
-                                           top_k=self.top_k,
-                                           temperature=self.temperature,
-                                           top_p=self.top_p,)
+                                           max_length=inputs.input_ids.size(dim=1) + out_len,)
+        """
+        top_k=self.top_k,
+        temperature=self.temperature,
+        top_p=self.top_p,"""
         output = self.tokenizer.batch_decode(generate_ids,
                                              attention_mask=inputs.attention_mask,
                                              skip_special_tokens=True,

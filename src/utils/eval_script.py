@@ -2,7 +2,7 @@ from tqdm import tqdm
 from datetime import datetime
 from pathlib import Path
 from src.utils.example_creators import parse_output_sentence_char, \
-    built_eval_doc, sort_nested_events, write_eval_file, gold_list, parse_output_sentence
+    built_eval_doc, sort_nested_events, write_eval_file, gold_list, nested_output_converter
 from src.utils.a2_evaluation_class import event_eval
 
 PATH = Path(__file__).parent.parent.parent.resolve()
@@ -52,86 +52,87 @@ def a2_evaluation(outputs, output, arg_finder):
     return -1
 
 
-def local_eval(outputs, arg_finder):
-    total_f1 = 0
-    total_prec = 0
-    total_rec = 0
+def local_evaluation(outputs, arg_finder):
+    micro_gold = []
+    micro_pred = []
     for output in outputs:
         gold = set()
         output_prompt = output['output_prompt']
         example = output['example']
         for event in example.events:
             gold.add(gold_list(example, event))
-
-        if arg_finder == 0:
+        if arg_finder < 2:
             # extract all generated events
             pred, rec_error, rec_sentence = parse_output_sentence_char(example.tokens, output_prompt, example.nld)
-            result_set = events_only_results(pred, example)
+            if arg_finder == 1:
+                #result converter for only events without nested nld
+                result_set = events_only_results(pred, example,)
+            else:
+                #result converter for plain text modified nld
+                result_set = events_only_results(pred, example, plain=True)
         else:
-            pred, rec_error = parse_output_sentence(output_prompt, example.nld)
-            for special_token in [example.nld['begin_entity_token'], example.nld['end_entity_token']]:
-                output_prompt = output_prompt.replace(special_token, ' ' + special_token + ' ')
-            result_set = sentence_results(output_prompt)
-        f1, prec, rec = calc_metric(result_set, gold)
-        print(f'Output: {output["output_prompt"]} >>>> Gold: {output["example"].output_tokens} >>>> F1-Score: {f1}')
-        total_rec += rec
-        total_prec += prec
-        total_f1 += f1
-    total_f1 = total_f1/len(outputs)
-    total_prec = total_prec / len(outputs)
-    total_rec = total_rec / len(outputs)
+            #result converter for nested nld with arg_types first
+            conv = nested_output_converter()
+            result_set = conv.convert_arg_start(output_prompt, example.nld)
+        micro_gold.append(gold)
+        micro_pred.append(result_set)
+        print(f'Output: {output["output_prompt"]} >>>> Gold: {output["example"].output_tokens}')
+        print(f"Pred_Sets: {result_set} >>>> Gold_sets: {gold}")
+    f1, prec, rec = calc_metric(micro_pred, micro_gold)
     # sort output by single and nested events
-    return total_f1, total_prec, total_rec
+    return f1, prec, rec
 
 
-def events_only_results(pred, example):
+def events_only_results(pred, example, plain: bool = False):
     result_set = set()
     for prediction in pred:
-        result = pred_list(pred, prediction, example)
+        if not plain:
+            result = pred_list(pred, prediction, example)
+        else:
+            result = plain_pred_list(pred, prediction, example)
         if result:
             result_set.add(result)
         else:
             miss_match_error = True
     return result_set
 
+def plain_pred_list(preds, pred, example):
+    head, tags, start, end = pred
+    event_tuple = (tags[0][0],)
+    preds_names = [e[0] for e in preds]
+    if len(tags) == 1:
+        return event_tuple
+    for arg in tags[1:]:
+        try:
+            arg_name, arg_type = arg
+        except:
+            continue
+        if arg_name in [example.tokens[pred_names.start:pred_names.end] for pred_names in example.entities]:
+            new_event = [e for e in example.entities if example.tokens[e.start:e.end] == arg_name]
+            if new_event:
+                event_tuple += (arg_type, example.tokens[new_event[0].start:new_event[0].end])
+        if arg_name in preds_names:
+            new_event = [e for e in preds if e[0] == arg_name and e != pred]
+            if new_event:
+                if new_event[0][0] == head:
+                    # get a random event that has not the same trigger as the current
+                    x = [e for e in new_event if e[-1] != end and e[-2] != end]
+                    if not x:
+                        x = [e for e in new_event if e[1][0][0] != tags[0][0]]
+                        if not x:
+                            x = new_event
+                    if [e for e in x if head not in [a[0] for a in e[1][1:]]]:
+                        x = [e for e in x if head not in [a[0] for a in e[1][1:]]]
+                    less_preds = [p for p in preds if head != p[0]]
+                    less_preds.append(x[0])
+                    event_tuple = event_tuple + (arg_type, plain_pred_list(less_preds, new_event[0], example))
+                else:
+                    if [e for e in new_event if head not in [a[0] for a in e[1][1:]]]:
+                        new_event = [e for e in new_event if head not in [a[0] for a in e[1][1:]]]
+                    event_tuple = event_tuple + (arg_type, plain_pred_list(preds, new_event[0], example))
+    return event_tuple
 
-def sentence_results(output):
-    print(1)
-'''    for prediction in pred:
-        head, tags, start, end = prediction
-        if ' of ' in head:
-            first = head.split(' of ')
-            event_type = first[0]
-            output_tuple = (event_type,)
-            cut_out = " by ".join(" of ".join(first[1:]).split(' by ')[:-1])
-            if ' Theme ' in cut_out:
-                themes = head.split(' Theme ')
-                for theme in themes:
-                    if ' of ' in cut_out:
-                        if ' and ' in theme:
-                            output_theme = " and ".join(theme.split(' and '))
-                        elif ' by ' in theme:
-                            output_theme = theme.split(' by ')[0]
-                    else:
-                        if ' and ' in theme:
-                            output_theme = theme.split(' and ')[0]
-                            output_tuple += ('Theme', output_theme)
-                        elif ' by ' in theme:
-                            output_theme = theme.split(' by ')[0]
-                            output_tuple += ('Theme', output_theme)
-                        else:
-                            output_tuple += ('Theme', theme)
 
-            if ' Cause ' in cut_out:
-        else:
-            if ' by ' in head:
-                return (head.split(' by ')[0],)
-            return None
-
-
-    return result_set
-
-'''
 def pred_list(preds, pred, example):
     head, tags, start, end = pred
     pred_id, pred_type = head.split(':')
@@ -155,27 +156,31 @@ def pred_list(preds, pred, example):
     return event_tuple
 
 
-def calc_metric(result_set, gold):
-    result_intersection = gold.intersection(result_set)
-    if len(gold) == len(result_set) == 0:
-        return 1, 1, 1
-    else:
-        try:
-            prec = len(result_intersection) / len(gold)
-        except:
-            if len(result_intersection) == 0:
-                prec = 1
-            else:
-                prec = 0
-        try:
-            rec = len(result_intersection) / len(result_set)
-        except:
-            if len(gold) == 0:
-                rec = 1
-            else:
-                rec = 0
-        try:
-            f1 = 2 * ((prec * rec) / (prec + rec))
-        except:
-            f1 = 0
-        return f1, prec, rec
+def calc_metric(micro_pred, micro_gold):
+    intersec = 0
+    gold_result = 0
+    pred_result = 0
+    for pred, gold in zip(micro_pred, micro_gold):
+        result_intersection = gold.intersection(pred)
+        intersec += len(result_intersection)
+        gold_result += len(gold)
+        pred_result += len(pred)
+    try:
+        prec = intersec / gold_result
+    except:
+        if intersec == 0:
+            prec = 1
+        else:
+            prec = 0
+    try:
+        rec = intersec / pred_result
+    except:
+        if gold_result == 0:
+            rec = 1
+        else:
+            rec = 0
+    try:
+        f1 = 2 * ((prec * rec) / (prec + rec))
+    except:
+        f1 = 0
+    return f1, prec, rec

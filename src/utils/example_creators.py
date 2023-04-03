@@ -36,10 +36,7 @@ def create_input_example(example: Example, nld_args, blocked_entities: str = '',
         # insert entity marker in sentence
         example.input_tokens = augment_sentence(list(example.tokens),
                                                 augmentations,
-                                                nld_args['begin_entity_token'],
-                                                nld_args['separator_token'],
-                                                nld_args['relation_separator_token'],
-                                                nld_args['end_entity_token'],
+                                                nld_args
                                                 )
     else:
         example.input_tokens = ''.join(example.tokens)
@@ -64,25 +61,22 @@ def create_output_example(example: Example, nld_args, blocked_entities: str = ''
             if entity.type in blocked_entities:
                 continue
             augmentations.append(([(entity.type,)], entity.start, entity.end))
-    if events_only < 2:
-        # add event annotation for event extraction
-        if task == 'ee':
-            if events_only == 1:
-                augmentations = get_id_augmentations(example=example)
-            else:
-                augmentations = get_plain_augmentations(example=example)
+    # add event annotation for event extraction
+    if task == 'ee':
+        # events_only 0&1 is for plain NLD and event NLD
+        if events_only == 1:
+            augmentations = get_id_augmentations(example=example)
+        elif events_only == 0:
+            augmentations = get_plain_augmentations(example=example)
+        # events_only 2&3 is for nested_NLD with arg type first and last respectively
+        elif events_only >= 2:
+            augmentations = get_nested_augmentations(example=example)
 
         # append output sentence of example and insert annotation
-            example.output_tokens = augment_sentence(list(example.tokens),
-                                                     augmentations,
-                                                     nld_args['begin_entity_token'],
-                                                     nld_args['separator_token'],
-                                                     nld_args['relation_separator_token'],
-                                                     nld_args['end_entity_token'],
-                                                     events_only=events_only,)
-    else:
-        example.output_tokens = text_events_only_augment_sentence(example=example,
-                                                                  nld_args=nld_args)
+        example.output_tokens = augment_sentence(list(example.tokens),
+                                                 augmentations,
+                                                 nld_args,
+                                                 events_only=events_only,)
 
 
 def get_plain_augmentations(example):
@@ -123,6 +117,18 @@ def get_id_augmentations(example):
         if arguments:
             augmentations.append((arguments, event.start, event.end))
     return augmentations
+
+
+def get_nested_augmentations(example):
+    augments = set()
+    for event in example.events:
+        augments.add(gold_list(example, event, text_embed=True))
+    for augment in augments.copy():
+        for compare in augments.copy():
+            if compare != augment and augment in compare:
+                if augment in augments:
+                    augments.remove(augment)
+    return augments
 
 
 def single_prompt_parser(examples, nld_args):
@@ -548,9 +554,8 @@ def parse_output_sentence_char(example_tokens: str, output_sentence: str, nld_ar
 
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-def augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], int, int]], begin_entity_token: str,
-                     sep_token: str, relation_sep_token: str, end_entity_token: str,
-                     query_separator_token:str = ':', events_only: int = 0) -> str:
+def augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], int, int]], nld:Dict,
+                     events_only: int = 0) -> str:
     """
     Augment a sentence by adding tags in the specified positions.
 
@@ -579,18 +584,22 @@ def augment_sentence(tokens: List[str], augmentations: List[Tuple[List[tuple], i
     if events_only == 0:
         sentence = plain_text_augment_sentence(tokens,
                                                augmentations,
-                                               begin_entity_token,
-                                               sep_token,
-                                               relation_sep_token,
-                                               end_entity_token,
-                                               query_separator_token)
-    else:
+                                               nld["begin_entity_token"],
+                                               nld["separator_token"],
+                                               nld["relation_separator_token"],
+                                               nld["end_entity_token"],
+                                               nld["query_separator_token"])
+    elif events_only == 1:
         sentence = events_only_augment_sentence(augmentations,
-                                                begin_entity_token,
-                                                sep_token,
-                                                relation_sep_token,
-                                                end_entity_token,
-                                                query_separator_token)
+                                                nld["begin_entity_token"],
+                                                nld["separator_token"],
+                                                nld["relation_separator_token"],
+                                                nld["end_entity_token"],
+                                                nld["query_separator_token"])
+    else:
+        sentence = nested_NLD_augment_sentence(augmentations,
+                                               nld_args=nld,
+                                               events_only=events_only)
     return sentence
 
 
@@ -629,9 +638,124 @@ def plain_text_augment_sentence(tokens: List[str], augmentations: List[Tuple[Lis
                                  begin_entity_token, sep_token, relation_sep_token, end_entity_token,))
 
 
+def nested_argstart_output_converter(output_sentence: str, nld_args) -> set:
+    output_set = set()
+    stack = []
+    for cid, char in enumerate(output_sentence):
+        if char is nld_args["begin_entity_token"]:
+            x = (output_sentence[cid + 1:].split(nld_args["separator_token"])[0],)
+            stack.append(x)
+        if char is nld_args["end_entity_token"]:
+            event = stack.pop()
+            output_set.add(event)
+            for higher_event in stack:
+                higher_event += event
+        if char is nld_args["separator_token"]:
+            stack[-1] += (output_sentence[cid + 1:].split(nld_args["separator_token"])[0].split(nld_args["relation_separator_token"])[0],)
+    return output_set
+
+
+class nested_output_converter:
+    def __init__(self):
+        self.output_set = set()
+
+    def convert_arg_start(self, output_sentence: str, nld_args):
+        #skip nones and false example
+        if "None" in output_sentence:
+            return set()
+        elif len(output_sentence) < 10:
+            return set()
+
+        # crop output sentence
+        try:
+            start_position = min([pos for pos, char in enumerate(output_sentence) if char == nld_args["begin_entity_token"]])
+        except:
+            output_sentence = nld_args["begin_entity_token"] + output_sentence
+            start_position = len(output_sentence)
+        try:
+            end_position = max([pos for pos, char in enumerate(output_sentence) if char == nld_args["end_entity_token"]])
+        except:
+            output_sentence = output_sentence + nld_args["end_entity_token"]
+            end_position = len(output_sentence) + 1
+        output_sentence = output_sentence[start_position:end_position + 1]
+
+        # split nested events
+        nested_events = output_sentence.split("][")
+        # single nested event
+        if len(nested_events) == 1:
+            # extract events
+            self.arg_start(nested_events[0], nld_args)
+        else:
+            # multiple nested events
+            for nid, nested_event in enumerate(nested_events):
+                if len(output_sentence) < 10:
+                    continue
+                if not nested_event.startswith(nld_args["begin_entity_token"]):
+                    nested_event = "[" + nested_event
+                if not nested_event.endswith(nld_args["end_entity_token"]):
+                    nested_event = nested_event + "]"
+                # extract events
+                self.arg_start(nested_event, nld_args)
+        return self.output_set
+
+    def arg_start(self, output_sentence: str, nld_args) -> Tuple:
+        # add event_type to tuple
+        event_type = output_sentence.split(nld_args["separator_token"])[0].split(nld_args["begin_entity_token"])[-1]
+        output_tuple = (event_type,)
+        output_sentence = output_sentence[len(event_type) + 1:]
+        inner_event = 0
+        b_open = 1
+        b_close = 0
+        for cid, char in enumerate(output_sentence[:-1]):
+            if char is nld_args["separator_token"]:
+                if inner_event > 0:
+                    continue
+                # add arg_type to tuple
+                arg_type = output_sentence[cid + 1:].split(nld_args["separator_token"])[0].split(
+                           nld_args["relation_separator_token"])[0]
+                output_tuple += (arg_type,)
+            if char is nld_args["relation_separator_token"]:
+                if inner_event > 0:
+                    continue
+                if output_sentence[cid + 1] is nld_args["begin_entity_token"]:
+                    output_tuple = output_tuple + (self.arg_start(output_sentence[cid + 1:],
+                                                   nld_args=nld_args),)
+                else:
+                    # add simple arg_name to tuple
+                    if len(output_sentence[cid + 1:].split(nld_args["end_entity_token"])[0]) \
+                            < len(output_sentence[cid + 1:].split(nld_args["separator_token"])[0]):
+                        arg_name = output_sentence[cid + 1:].split(nld_args["end_entity_token"])[0]
+                    else:
+                        arg_name = output_sentence[cid + 1:].split(nld_args["separator_token"])[0]
+                    output_tuple += (arg_name,)
+            if char is nld_args["begin_entity_token"]:
+                b_open += 1
+                if char is nld_args["begin_entity_token"]:
+                    inner_event += 1
+            if char is nld_args["end_entity_token"]:
+                b_close += 1
+                if b_close == b_open:
+                    break
+                inner_event -= 1
+        self.output_set.add(output_tuple)
+        return output_tuple
+
+    '''def lin_arg_start(self, output_sentence: str, nld_args) -> Tuple:
+        start = 0
+        end = 0
+        for cid, char in enumerate(output_sentence):
+            if char is nld_args["begin_entity_token"]:
+            if char is nld_args["relation_separator_token"]:
+            if char is nld_args["relation_separator_token"]:
+            if char is nld_args["end_entity_token"]:
+'''
+    def get_results(self):
+        return self.output_set
+
+
 def events_only_augment_sentence(augmentations: List[Tuple[List[tuple], int, int]], begin_entity_token: str,
                                  sep_token: str, relation_sep_token: str, end_entity_token: str,
-                                 query_separator_token:str = ':'):
+                                 query_separator_token: str = ':'):
     # sort entities by start id
     augmentations = list(sorted(augmentations, key=lambda z: z[0][0]))
     if not augmentations:
@@ -640,38 +764,43 @@ def events_only_augment_sentence(augmentations: List[Tuple[List[tuple], int, int
                                       sep_token, relation_sep_token, end_entity_token, query_separator_token))
 
 
-def text_events_only_augment_sentence(example: Example, nld_args):
-    augments = set()
-    for event in example.events:
-        augments.add(gold_list(example, event, text_embed=True))
-    for augment in augments.copy():
-        for compare in augments.copy():
-            if compare != augment and augment in compare:
-                if augment in augments:
-                    augments.remove(augment)
+def nested_NLD_augment_sentence(augments, nld_args, events_only: int = 2):
     output = ""
     for augment in augments:
-        output += text_event_only_expand(augment, nld_args)
+        if events_only == 2:
+            output += nested_event_only_argfirst(augment, nld_args)
+        else:
+            output += nested_event_only_arglast(augment, nld_args)
     if not output:
         output = "None"
     return output
 
 
-def text_event_only_expand(augment, nld_args):
+def nested_event_only_arglast(augment, nld_args):
     if isinstance(augment[0], tuple):
         augment = augment[0]
     prompt = nld_args['begin_entity_token'] + augment[0]
     for guid, tag in enumerate(augment[2::2]):
-        if guid == 0:
-            filler = ' of '
-        else:
-            filler = ' and '
-        prompt += filler + tag + " "
+        prompt += nld_args['separator_token']
         if isinstance(augment[guid * 2 + 3], tuple):
-            prompt += text_event_only_expand(augment[guid * 2 + 3], nld_args)
+            prompt += nested_event_only_arglast(augment[guid * 2 + 3], nld_args) + nld_args['relation_separator_token'] + tag
         else:
-            prompt += augment[guid * 2 + 3]
-    prompt += " " + 'by' + " " + augment[1] + nld_args['end_entity_token']
+            prompt += augment[guid * 2 + 3] + nld_args['relation_separator_token'] + tag
+    prompt += nld_args['end_entity_token']
+    return prompt
+
+
+def nested_event_only_argfirst(augment, nld_args):
+    if isinstance(augment[0], tuple):
+        augment = augment[0]
+    prompt = nld_args['begin_entity_token'] + augment[0]
+    for guid, tag in enumerate(augment[2::2]):
+        prompt += nld_args['separator_token']
+        if isinstance(augment[guid * 2 + 3], tuple):
+            prompt += tag + nld_args['relation_separator_token'] + nested_event_only_argfirst(augment[guid * 2 + 3], nld_args)
+        else:
+            prompt += tag + nld_args['relation_separator_token'] + augment[guid * 2 + 3]
+    prompt += nld_args['end_entity_token']
     return prompt
 
 
@@ -805,11 +934,11 @@ def compress_string(sentence: str):
 
 
 def parse_example(sentence, example_id, events, entities, relations,
-                  offset: int = 0, skip_oos_examples: bool = False, valid_event_types: List = None) -> Example:
+                  offset: int = 0, skip_oos_examples: bool = False, valid_event_types: List = None,
+                  banned_args: List = None, validation_set: set = None) -> Example:
     example_entities = []
     example_events = []
     example_relations = []
-
     # find all entities, relations and events that belong to the example sentence
     if entities:
         reformatted_entities = [ta for ta in entities if ta['offsets'][0][0] >= offset
@@ -817,6 +946,8 @@ def parse_example(sentence, example_id, events, entities, relations,
 
         # add all entities in the given sentence
         for entity in reformatted_entities:
+            if "[" in entity or "]" in entity:
+                return None
             example_entities.append(Entity(start=entity['offsets'][0][0] - offset,
                                            end=entity['offsets'][0][1] - offset,
                                            type=entity['type'],
@@ -825,28 +956,24 @@ def parse_example(sentence, example_id, events, entities, relations,
         reformatted_events = [ta for ta in events if ta['trigger']['offsets'][0][0] >= offset
                               and ta['trigger']['offsets'][0][1] <= offset + len(sentence)]
         event_ids = [e['id'] for e in reformatted_events]
+        if reformatted_events:
+            if validation_set:
+                if not set([e['type'] for e in reformatted_events]).intersection(set(validation_set)):
+                    return None
+        skiped_events = []
         # add all events in the given sentence
         for event in reformatted_events:
-            if event['type'] in valid_event_types:
-                args = False
-                for arg in event['arguments']:
-                    if arg['ref_id'].split('_')[-1].startswith('E'):
-                        event = [e for e in reformatted_events if arg['ref_id'] is e['id']]
-                        if event:
-                            if event['type'] not in valid_event_types:
-                                args = True
-                        else:
-                            args = True
-                if not args:
-                    curr_event = event_getter(event, offset, example_entities, event_ids)
-                    if curr_event:
-                        example_events.append(curr_event)
-                    else:
-                        if skip_oos_examples:
-                            return None
-        if not example_events and reformatted_events:
-            return None
-
+            if event['type'] not in valid_event_types:
+                skiped_events.extend(skip_events(event, reformatted_events))
+        for event in reformatted_events:
+            if event not in skiped_events:
+                curr_event = event_getter(event, offset, example_entities, event_ids, banned_args)
+                if curr_event:
+                    example_events.append(curr_event)
+                else:
+                    if skip_oos_examples:
+                        return None
+    '''
     if relations:
         reformatted_relations = [ta for ta in events if ta['trigger']['offsets'][0][0] >= offset
                   and ta['trigger']['offsets'][0][1] <= offset + len(sentence)]
@@ -858,7 +985,7 @@ def parse_example(sentence, example_id, events, entities, relations,
                 head=relation['arg1_id'],
                 tail=relation['arg2_id'],
             ))
-
+    '''
     return Example(
         id=example_id,
         tokens=sentence,
@@ -869,9 +996,20 @@ def parse_example(sentence, example_id, events, entities, relations,
     )
 
 
-def event_getter(event, offset, example_entities, event_ids,):
+def skip_events(event, reformatted_events):
+    del_events = [event]
+    events = [e for e in reformatted_events if event["id"] in [arg['ref_id'] for arg in e['arguments']]]
+    if events:
+        for event in events:
+            del_events.extend(skip_events(event, reformatted_events))
+    return del_events
+
+
+def event_getter(event, offset, example_entities, event_ids, banned_args: list = None):
     example_arguments = []
     for argument in event['arguments']:
+        if argument['role'] in banned_args:
+            continue
         if argument['ref_id'].split('_')[-1].startswith('T') and argument['ref_id'] not in [e.id for e in
                                                                                             example_entities]:
             return None
@@ -1297,6 +1435,22 @@ def gold_list(example, event, text_embed: bool = False):
     return event_tuple
 
 
+def down_sample_prompt(example, prompt):
+    prompt = example.nld.example_separator.join(prompt.split(example.nld.example_separator)[1:])
+    prompt = example.nld.head + prompt
+    return prompt
+
+
 def collate_fn(data):
     example, nld = data[0]
     return example['prompt'], example['examples'], nld
+
+
+if __name__ == '__main__':
+    nld = {"begin_entity_token": '[',
+           "separator_token": '|',
+           "relation_separator_token": '=',
+           "end_entity_token": ']',
+           "query_separator_token": ':'}
+    conv = nested_output_converter()
+    result_set = conv.convert_arg_start("[Positive_regulation|Theme=[Regulation|Theme=[Phosphorylation|Theme=HSP27]]|Cause=[Positive_regulation|Theme=[Gene_expression|Theme=PKD3]]]", nld)

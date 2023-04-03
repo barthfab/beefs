@@ -1,0 +1,16 @@
+_target_: src.models.LLaMA_module.LLaMA
+
+
+model: "decapoda-research/llama-7b-hf"
+
+arg_finder: 2
+
+local_eval: True
+
+do_sampling: False
+
+top_k: 0
+
+top_p: 0
+
+temperature: 0

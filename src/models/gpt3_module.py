@@ -3,7 +3,7 @@ from typing import Any, List
 from datetime import datetime
 from tqdm import tqdm
 import pytorch_lightning as pl
-from src.utils.eval_script import a2_evaluation, local_eval
+from src.utils.eval_script import a2_evaluation, local_evaluation
 
 
 class Gpt3(pl.LightningModule):
@@ -23,7 +23,7 @@ class Gpt3(pl.LightningModule):
         self.output = output
         self.arg_finder = arg_finder
         try:
-            self.local_eval = local_eval
+            self.local_eval = local_evaluation
         except:
             self.local_eval = True
         openai.api_key = api_key
@@ -73,10 +73,9 @@ class Gpt3(pl.LightningModule):
     def test_epoch_end(self, outputs: List[Any]):
         # todo safe all found events in a dict
         if self.local_eval:
-            f1, prec, rec = local_eval(outputs, self.arg_finder)
+            f1, prec, rec = local_evaluation(outputs, self.arg_finder)
         else:
             f1, prec, rec = a2_evaluation(outputs, self.output, self.arg_finder)
-
         self.log("val/f1", f1, on_epoch=True)
         self.log("val/precision", prec, on_epoch=True)
         self.log("val/recall", rec, on_epoch=True)

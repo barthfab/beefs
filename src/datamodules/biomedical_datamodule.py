@@ -60,7 +60,8 @@ class SingleDataset(LightningDataModule):
             events_only: int = 0,
             event_types: str = 'all',
             skip_oos_examples: bool = False,
-
+            banned_args: str = None,
+            prediction_types: str = None,
     ):
         super().__init__()
         self.seed = seed
@@ -74,6 +75,14 @@ class SingleDataset(LightningDataModule):
 
         self.bigbio_path = Path.joinpath(PATH, 'biomedical', 'bigbio', 'biodatasets', self.hparams.data_set)
         self.event_types = event_types
+        if prediction_types:
+            self.prediction_types = prediction_types.split(",")
+        else:
+            self.prediction_types = prediction_types
+        if banned_args:
+            self.banned_args = banned_args.split(",")
+        else:
+            self.banned_args = None
         if nld:
             self.nld = nld['nld']
         else:
@@ -120,7 +129,8 @@ class SingleDataset(LightningDataModule):
                                                            name=f"{self.hparams.data_set}_bigbio_kb",
                                                            split='train')
 
-            example, entity_type, event_type, relation_type = self.get_all_examples(complete_dataset)
+            example, entity_type, event_type, relation_type = self.get_all_examples(complete_dataset,
+                                                                                    validation_set=None)
 
             train_example, _, train_event_type, _ = self.get_all_examples(complete_train_dataset)
 

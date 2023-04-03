@@ -7,11 +7,11 @@ from src.utils.example_creators import single_prompt_parser
 
 class SingleBioEventDataset(Dataset):
     def __init__(self, data, train_data, nld, seed, example_size: int = 1,
-                 learning_method: str = None, no_event_threshold: float = 0.2,
-                 ):
+                 learning_method: str = None, no_event_threshold: float = 0.2):
         super().__init__()
         self.data = data
         self.train_data = train_data
+        self.event_types = [e for e in train_data.keys() if e != "None"]
         self.filler = [e for event_type in self.train_data.values() for e in event_type]
         self.nld = nld
         self.seed = seed
@@ -31,7 +31,8 @@ class SingleBioEventDataset(Dataset):
             if event_types:
                 bucket = self.event_specific(self.train_data, event_types)
             else:
-                bucket = random.sample(self.filler, k=self.example_size)
+                bucket = self.event_specific(self.train_data, self.event_types)
+                #bucket = random.sample(self.filler, k=self.example_size)
         prompt = single_prompt_parser(bucket + [example], self.nld)
         return prompt, example
 
@@ -44,17 +45,24 @@ class SingleBioEventDataset(Dataset):
         for event_type in event_types:
             if event_type in example_list.keys():
                 filler.extend(example_list[event_type])
-                bucket.append(random.choice([e for e in example_list[event_type] if e not in bucket]))
+                try:
+                    bucket.append(random.choice([e for e in example_list[event_type] if e not in bucket]))
+                except:
+                    bucket.append(random.choice([e for e in example_list[event_type] if e not in bucket]))
             else:
                 print(f"couldnt find an example for this event type: {event_type}")
                 bucket.append(random.choice(example_list['None']))
 
         # fill the rest of the bucket with random examples
         if self.example_size - len(bucket) > 0:
-            not_nones = random.sample([e for e in filler if e not in bucket],
-                                      k=math.ceil((self.example_size - len(bucket)) * (1 - self.no_event_threshold)))
+            try:
+                not_nones = random.sample([e for e in filler if e not in bucket],
+                                  k=math.ceil((self.example_size - len(bucket)) * (1 - self.no_event_threshold)))
+            except:
+                not_nones = random.sample([e for e in example_list['None'] if e not in bucket],
+                                          k=math.ceil((self.example_size - len(bucket)) * (1 - self.no_event_threshold)))
             nones = random.sample([e for e in example_list['None'] if e not in bucket],
-                                  k=math.floor((self.example_size - len(bucket)) * self.no_event_threshold))
+                              k=math.floor((self.example_size - len(bucket)) * self.no_event_threshold))
             bucket.extend(not_nones)
             bucket.extend(nones)
 
