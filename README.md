@@ -13,7 +13,7 @@ Biomedical Event Extraction with Few Shot Training (BEEFS)
 
 ## Description
 
-a test setup to run few shot experiments on biomedical event extraction
+a test setup for running few shot experiments on biomedical event extraction
 
 ## How to run
 
